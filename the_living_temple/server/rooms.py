@@ -40,7 +40,7 @@ def reset_room_runtime_state(room: Any) -> None:
     frag = room.code_fragments[room.room_index]
     room.room_static, room.room_runtime = build_room(room.room_index, frag)
     for ps in room.players.values():
-        ps.hp = 3
+        ps.hp = 30
         ps.down = False
         ps.revive_progress = 0.0
         ps.damage_cd.clear()
