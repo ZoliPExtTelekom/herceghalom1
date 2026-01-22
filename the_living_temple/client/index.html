@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Temple Escape (MVP)</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="topbar">
+        <div class="title">The Living Temple (MVP)</div>
+        <div class="status">
+          <span id="status">Disconnected</span>
+          <span class="sep">|</span>
+          <span id="roomLabel">Room: -</span>
+          <span class="sep">|</span>
+          <span id="roleLabel">Role: -</span>
+        </div>
+      </header>
+
+      <section class="lobby">
+        <label>
+          Room code (empty = create)
+          <input id="roomCode" placeholder="ABCDE" maxlength="5" />
+        </label>
+        <label>
+          Name (optional)
+          <input id="playerName" placeholder="Player" maxlength="16" />
+        </label>
+        <div class="lobbyButtons">
+          <button id="connect">Connect</button>
+          <button id="ready" disabled>Ready</button>
+        </div>
+      </section>
+
+      <canvas id="game" width="960" height="540"></canvas>
+
+      <section class="hud">
+        <div class="hudCol">
+          <div class="hudTitle">Players</div>
+          <div id="youRole" class="roleCard"></div>
+          <div id="roster" class="roster"></div>
+        </div>
+        <div class="hudCol">
+          <div class="hudTitle">Code fragments</div>
+          <div id="fragments" class="fragments"></div>
+        </div>
+        <div class="hudCol">
+          <div class="hudTitle">Final gate</div>
+          <div class="finalRow">
+            <input id="finalCode" placeholder="Enter full code" />
+            <button id="submitCode" disabled>Submit</button>
+          </div>
+          <div class="hint">Room 5: stand on both plates + interact (E) with the panel.</div>
+        </div>
+        <div class="hudCol hudColWide">
+          <div class="hudTitle">Quick chat</div>
+          <div class="chatButtons">
+            <button class="qc" data-qc="WAIT">WAIT</button>
+            <button class="qc" data-qc="ON_PLATE">ON PLATE</button>
+            <button class="qc" data-qc="PULL_LEVER">PULL LEVER</button>
+            <button class="qc" data-qc="GO">GO</button>
+            <button class="qc" data-qc="OK">OK</button>
+            <button class="qc" data-qc="HELP">HELP</button>
+          </div>
+          <div id="messages" class="messages"></div>
+          <div class="hint">Click on the canvas to ping.</div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/static/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The Living Temple Protocol (MVP)",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/ClientToServer" },
+    { "$ref": "#/$defs/ServerToClient" }
+  ],
+  "$defs": {
+    "BaseMessage": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" }
+      },
+      "required": ["type"],
+      "additionalProperties": true
+    },
+    "Hello": {
+      "type": "object",
+      "properties": { "type": { "const": "hello" }, "version": { "type": "integer", "const": 1 } },
+      "required": ["type", "version"],
+      "additionalProperties": false
+    },
+    "Join": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "join" },
+        "room_code": { "type": "string" },
+        "player_name": { "type": "string" }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+    "Ready": {
+      "type": "object",
+      "properties": { "type": { "const": "ready" }, "ready": { "type": "boolean" } },
+      "required": ["type", "ready"],
+      "additionalProperties": false
+    },
+    "Input": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "input" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "move_x": { "type": "number" },
+        "move_y": { "type": "number" },
+        "interact": { "type": "boolean" }
+      },
+      "required": ["type", "seq", "move_x", "move_y"],
+      "additionalProperties": false
+    },
+    "Ping": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "ping" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "label": { "type": "string" }
+      },
+      "required": ["type", "x", "y"],
+      "additionalProperties": false
+    },
+    "QuickChat": {
+      "type": "object",
+      "properties": { "type": { "const": "quick_chat" }, "preset_id": { "type": "string" } },
+      "required": ["type", "preset_id"],
+      "additionalProperties": false
+    },
+    "CodeSubmit": {
+      "type": "object",
+      "properties": { "type": { "const": "code_submit" }, "code": { "type": "string" } },
+      "required": ["type", "code"],
+      "additionalProperties": false
+    },
+    "ClientToServer": {
+      "oneOf": [
+        { "$ref": "#/$defs/Hello" },
+        { "$ref": "#/$defs/Join" },
+        { "$ref": "#/$defs/Ready" },
+        { "$ref": "#/$defs/Input" },
+        { "$ref": "#/$defs/Ping" },
+        { "$ref": "#/$defs/QuickChat" },
+        { "$ref": "#/$defs/CodeSubmit" }
+      ]
+    },
+    "Welcome": {
+      "type": "object",
+      "properties": { "type": { "const": "welcome" }, "version": { "type": "integer", "const": 1 } },
+      "required": ["type", "version"],
+      "additionalProperties": false
+    },
+    "Joined": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "joined" },
+        "room_code": { "type": "string" },
+        "player_id": { "type": "integer" },
+        "role": { "type": "string" },
+        "players": { "type": "array" }
+      },
+      "required": ["type", "room_code", "player_id", "role", "players"],
+      "additionalProperties": true
+    },
+    "State": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "state" },
+        "tick": { "type": "integer" },
+        "room_index": { "type": "integer" },
+        "players": { "type": "array" },
+        "entities": { "type": "array" },
+        "ui": { "type": "object" },
+        "messages": { "type": "array" }
+      },
+      "required": ["type", "tick", "room_index", "players", "entities"],
+      "additionalProperties": true
+    },
+    "Event": {
+      "type": "object",
+      "properties": { "type": { "const": "event" }, "name": { "type": "string" }, "data": {} },
+      "required": ["type", "name"],
+      "additionalProperties": true
+    },
+    "Error": {
+      "type": "object",
+      "properties": { "type": { "const": "error" }, "code": { "type": "string" }, "message": { "type": "string" } },
+      "required": ["type", "code", "message"],
+      "additionalProperties": false
+    },
+    "ServerToClient": {
+      "oneOf": [
+        { "$ref": "#/$defs/Welcome" },
+        { "$ref": "#/$defs/Joined" },
+        { "$ref": "#/$defs/State" },
+        { "$ref": "#/$defs/Event" },
+        { "$ref": "#/$defs/Error" }
+      ]
+    }
+  }
+}
