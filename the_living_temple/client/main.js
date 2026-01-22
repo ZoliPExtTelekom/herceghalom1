@@ -1,6 +1,7 @@
 const statusEl = document.getElementById("status");
 const roomLabelEl = document.getElementById("roomLabel");
 const roleLabelEl = document.getElementById("roleLabel");
+const soundToggleBtn = document.getElementById("soundToggle");
 
 const roomCodeInput = document.getElementById("roomCode");
 const playerNameInput = document.getElementById("playerName");
@@ -28,6 +29,7 @@ let ready = false;
 
 let inputSeq = 0;
 let lastState = null;
+let prevState = null;
 
 const keys = new Set();
 let interactHeld = false;
@@ -67,6 +69,396 @@ const ROLE_META = {
 const renderCache = {
   patterns: new Map(), // key: `${roomIndex}` -> { floorPattern, wallPattern }
 };
+
+class SoundEngine {
+  constructor() {
+    this.enabled = false;
+    this.ctx = null;
+    this.master = null;
+    this.musicGain = null;
+    this.sfxGain = null;
+    this.musicTimer = null;
+    this.musicState = { step: 0, lastNoteTime: 0, rootHz: 110 };
+    this._lastMsgT = -1;
+    this._seenMsgKeys = new Set();
+  }
+
+  async toggle() {
+    if (!this.enabled) {
+      await this.enable();
+    } else {
+      this.disable();
+    }
+  }
+
+  async enable() {
+    if (this.enabled) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new Ctx();
+    await this.ctx.resume();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.55;
+    this.master.connect(this.ctx.destination);
+
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = 0.22;
+    this.musicGain.connect(this.master);
+
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = 0.8;
+    this.sfxGain.connect(this.master);
+
+    this.enabled = true;
+    this.startMusic();
+  }
+
+  disable() {
+    this.enabled = false;
+    if (this.musicTimer) {
+      clearInterval(this.musicTimer);
+      this.musicTimer = null;
+    }
+    try {
+      this.ctx?.close();
+    } catch {}
+    this.ctx = null;
+    this.master = null;
+    this.musicGain = null;
+    this.sfxGain = null;
+    this._seenMsgKeys.clear();
+    this._lastMsgT = -1;
+  }
+
+  _now() {
+    return this.ctx.currentTime;
+  }
+
+  // ---------- Music (mystic ambient) ----------
+  startMusic() {
+    if (!this.ctx || !this.musicGain) return;
+    if (this.musicTimer) return;
+    // Base drone pad
+    this._startDrone();
+    // Sparse melodic chimes (phrygian-ish)
+    this.musicTimer = setInterval(() => this._musicTick(), 250);
+  }
+
+  _startDrone() {
+    const t0 = this._now();
+    const root = 55; // low A-ish
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+
+    osc1.type = "sawtooth";
+    osc2.type = "triangle";
+    osc1.frequency.setValueAtTime(root, t0);
+    osc2.frequency.setValueAtTime(root * 2, t0);
+    osc2.detune.setValueAtTime(7, t0);
+    osc1.detune.setValueAtTime(-6, t0);
+
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(260, t0);
+    filter.Q.setValueAtTime(0.7, t0);
+
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.18, t0 + 2.5);
+
+    lfo.type = "sine";
+    lfo.frequency.setValueAtTime(0.08, t0);
+    lfoGain.gain.setValueAtTime(22, t0);
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.musicGain);
+
+    osc1.start(t0);
+    osc2.start(t0);
+    lfo.start(t0);
+
+    // Keep references on the instance so GC doesn't kill them
+    this._drone = { osc1, osc2, lfo, lfoGain, filter, gain };
+  }
+
+  _musicTick() {
+    if (!this.enabled || !this.ctx) return;
+    const t = this._now();
+    // Don't overplay; keep it sparse
+    if (t - this.musicState.lastNoteTime < 1.2) return;
+    if (Math.random() < 0.55) return;
+
+    // Phrygian-like scale degrees (semitones): 0,1,3,5,7,8,10
+    const degrees = [0, 1, 3, 5, 7, 8, 10];
+    const step = (this.musicState.step + (Math.random() < 0.6 ? 1 : 2)) % degrees.length;
+    this.musicState.step = step;
+    const semi = degrees[step] + (Math.random() < 0.35 ? 12 : 0);
+    const freq = 110 * Math.pow(2, semi / 12);
+    this.musicState.lastNoteTime = t;
+    this._playChime(freq, 0.9);
+  }
+
+  _playChime(freq, dur) {
+    const t0 = this._now();
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    const delay = this.ctx.createDelay(1.0);
+    const fb = this.ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, t0);
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(freq * 1.2, t0);
+    filter.Q.setValueAtTime(6.0, t0);
+
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    delay.delayTime.setValueAtTime(0.17 + Math.random() * 0.06, t0);
+    fb.gain.setValueAtTime(0.25, t0);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.musicGain);
+
+    // tiny feedback delay for "mystic tail"
+    gain.connect(delay);
+    delay.connect(fb);
+    fb.connect(delay);
+    delay.connect(this.musicGain);
+
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
+  }
+
+  // ---------- SFX ----------
+  sfxPing() {
+    this._tone(880, 0.08, 0.16, "sine");
+  }
+  sfxInteract() {
+    this._click(0.03);
+  }
+  sfxPlate() {
+    this._thud(90, 0.09);
+  }
+  sfxLever() {
+    this._click(0.05, 520);
+  }
+  sfxValve() {
+    this._sweep(220, 160, 0.16);
+  }
+  sfxDoorOpen() {
+    this._sweep(260, 520, 0.22);
+    this._tone(660, 0.05, 0.12, "triangle");
+  }
+  sfxDamage() {
+    this._noiseBurst(0.06, 900);
+    this._thud(70, 0.07);
+  }
+  sfxDown() {
+    this._sweep(180, 70, 0.35);
+    this._noiseBurst(0.12, 500);
+  }
+  sfxRevive() {
+    this._tone(523.25, 0.04, 0.18, "sine");
+    this._tone(659.25, 0.04, 0.22, "sine");
+  }
+  sfxSolved() {
+    this._tone(392, 0.05, 0.25, "triangle");
+    this._tone(493.88, 0.05, 0.28, "triangle");
+    this._tone(587.33, 0.05, 0.32, "triangle");
+  }
+  sfxWrong() {
+    this._sweep(240, 120, 0.18);
+  }
+  sfxFinalSuccess() {
+    this._tone(392, 0.06, 0.35, "sine");
+    this._tone(523.25, 0.06, 0.35, "sine");
+    this._tone(659.25, 0.06, 0.35, "sine");
+    this._sweep(220, 880, 0.28);
+  }
+
+  _tone(freq, attack, release, type) {
+    if (!this.enabled || !this.ctx) return;
+    const t0 = this._now();
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.22, t0 + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + attack + release);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t0);
+    osc.stop(t0 + attack + release + 0.02);
+  }
+
+  _sweep(fromHz, toHz, dur) {
+    if (!this.enabled || !this.ctx) return;
+    const t0 = this._now();
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(fromHz, t0);
+    osc.frequency.exponentialRampToValueAtTime(toHz, t0 + dur);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(1200, t0);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+
+  _click(dur, freq = 880) {
+    this._tone(freq, 0.005, dur, "square");
+  }
+
+  _thud(freq, dur) {
+    if (!this.enabled || !this.ctx) return;
+    const t0 = this._now();
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, t0);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq * 0.6), t0 + dur);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+
+  _noiseBurst(dur, cutoffHz) {
+    if (!this.enabled || !this.ctx) return;
+    const t0 = this._now();
+    const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(cutoffHz, t0);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    src.start(t0);
+    src.stop(t0 + dur + 0.02);
+  }
+
+  // ---------- Event hooks ----------
+  handleNewState(state, prev) {
+    if (!this.enabled) return;
+
+    // room change
+    if (prev && (state.room_index ?? 0) !== (prev.room_index ?? 0)) {
+      this.sfxSolved();
+    }
+
+    // door open transition
+    const doorNow = isDoorOpen(state);
+    const doorPrev = prev ? isDoorOpen(prev) : false;
+    if (!doorPrev && doorNow) this.sfxDoorOpen();
+
+    // entity deltas (lever/switch/panel feedback)
+    if (prev) this._handleEntityDeltas(state, prev);
+
+    // players damage/down/revive
+    const prevById = new Map((prev?.players ?? []).map((p) => [p.player_id, p]));
+    for (const p of state.players ?? []) {
+      const pp = prevById.get(p.player_id);
+      if (pp) {
+        if ((p.hp ?? 0) < (pp.hp ?? 0)) this.sfxDamage();
+        if (!pp.down && p.down) this.sfxDown();
+        if (pp.down && !p.down) this.sfxRevive();
+      }
+    }
+
+    // fragments newly awarded (ui sent to both)
+    const prevAwarded = (prev?.ui?.fragments ?? []).filter((f) => f.awarded).length;
+    const nowAwarded = (state.ui?.fragments ?? []).filter((f) => f.awarded).length;
+    if (prev && nowAwarded > prevAwarded) this.sfxSolved();
+
+    // final unlock
+    if (prev && !prev.ui?.final_unlocked && state.ui?.final_unlocked) this.sfxFinalSuccess();
+
+    this._handleMessages(state);
+  }
+
+  _handleEntityDeltas(state, prev) {
+    const prevEnt = indexEntities(prev);
+    for (const e of state.entities ?? []) {
+      const id = e.id ?? `${e.type}:${e.x}:${e.y}`;
+      const pe = prevEnt.get(id);
+      if (!pe) continue;
+      if (e.type === "lever" && (e.state ?? 0) !== (pe.state ?? 0)) this.sfxLever();
+      if (e.type === "switch" && !!e.on !== !!pe.on) this.sfxInteract();
+      if (e.type === "panel" && !!e.active !== !!pe.active) this.sfxInteract();
+    }
+  }
+
+  _handleMessages(state) {
+    const msgs = state.messages ?? [];
+    for (const m of msgs) {
+      const t = m.t ?? -1;
+      const key = `${t}|${m.kind}|${m.player_id ?? ""}|${m.text ?? ""}`;
+      if (this._seenMsgKeys.has(key)) continue;
+      // only react to recent ones, to avoid a burst on enable
+      if (this._lastMsgT >= 0 && t <= this._lastMsgT) continue;
+      this._seenMsgKeys.add(key);
+      if (m.kind === "ping") this.sfxPing();
+      if (m.kind === "chat") this._click(0.04, 740);
+      if (m.kind === "system") {
+        const txt = String(m.text ?? "");
+        if (txt.includes("Wrong")) this.sfxWrong();
+        if (txt.includes("Valve OK")) this.sfxValve();
+        if (txt.includes("Switch activated")) this.sfxInteract();
+        if (txt.includes("Levers solved")) this.sfxSolved();
+        if (txt.includes("Valves solved")) this.sfxSolved();
+        if (txt.includes("Code fragment found")) this.sfxSolved();
+        if (txt.includes("Final code accepted")) this.sfxFinalSuccess();
+      }
+    }
+    const lastT = msgs.length ? Math.max(...msgs.map((m) => m.t ?? -1)) : -1;
+    if (lastT > this._lastMsgT) this._lastMsgT = lastT;
+  }
+}
+
+function isDoorOpen(state) {
+  for (const e of state.entities ?? []) if (e.type === "door") return !!e.open;
+  return false;
+}
+
+function indexEntities(state) {
+  const map = new Map();
+  for (const e of state.entities ?? []) {
+    const id = e.id ?? `${e.type}:${e.x}:${e.y}`;
+    map.set(id, e);
+  }
+  return map;
+}
+
+const audio = new SoundEngine();
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -152,8 +544,10 @@ function onMessage(msg) {
   }
 
   if (msg.type === "state") {
+    prevState = lastState;
     lastState = msg;
     updateHud(msg);
+    audio.handleNewState(msg, prevState);
     return;
   }
 }
@@ -1017,6 +1411,8 @@ readyBtn.addEventListener("click", () => {
   ready = !ready;
   readyBtn.textContent = ready ? "Unready" : "Ready";
   send({ type: "ready", ready });
+  // user gesture unlock for audio
+  if (audio.enabled) audio.ctx?.resume?.();
 });
 
 submitCodeBtn.addEventListener("click", () => {
@@ -1036,11 +1432,13 @@ canvas.addEventListener("click", (evt) => {
   if (!joined) return;
   const pos = worldPosFromCanvasEvent(evt);
   send({ type: "ping", x: pos.x, y: pos.y, label: "PING" });
+  if (audio.enabled) audio.sfxPing();
 });
 
 window.addEventListener("keydown", (evt) => {
   keys.add(evt.code);
   if (evt.code === "KeyE") interactHeld = true;
+  if (evt.code === "KeyE" && audio.enabled) audio.sfxInteract();
 });
 window.addEventListener("keyup", (evt) => {
   keys.delete(evt.code);
@@ -1050,3 +1448,12 @@ window.addEventListener("keyup", (evt) => {
 // Start loops
 sendInputLoop();
 draw();
+
+soundToggleBtn.addEventListener("click", async () => {
+  await audio.toggle();
+  soundToggleBtn.textContent = audio.enabled ? "Sound: On" : "Sound: Off";
+  if (audio.enabled) {
+    // Play a short cue so the user knows it's on
+    audio.sfxSolved();
+  }
+});
