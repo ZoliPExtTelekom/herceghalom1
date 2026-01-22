@@ -47,7 +47,7 @@ class PlayerState:
     role: str
     x: float
     y: float
-    hp: int = 3
+    hp: int = 30
     down: bool = False
     ready: bool = False
     revive_progress: float = 0.0
