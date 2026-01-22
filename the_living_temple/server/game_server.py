@@ -367,7 +367,7 @@ class GameServer:
             down.revive_progress += dt
             if down.revive_progress >= 3.5:
                 down.down = False
-                down.hp = 2
+                down.hp = 20
                 down.revive_progress = 0.0
                 room.messages.append({"t": room.tick, "kind": "system", "text": f"Player {down.player_id} revived."})
 
@@ -380,7 +380,7 @@ class GameServer:
         room.room_static, room.room_runtime = build_room(room.room_index, frag)
         for ps in room.players.values():
             ps.x, ps.y = self._spawn_for(room.room_index, ps.role)
-            ps.hp = 3
+            ps.hp = 30
             ps.down = False
             ps.revive_progress = 0.0
             ps.damage_cd.clear()
